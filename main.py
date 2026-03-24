@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -95,17 +95,36 @@ def get_relation_id(db_id, name):
     return None
 
 def get_today_page():
-    today = datetime.now().strftime("%Y-%m-%d")
-
+    # 1. 한국 시간 기준 오늘 날짜 생성 (Render 서버 시간 대응)
+    # 현재 서버가 2026년이라면 이에 맞춰 작동합니다.
+    kst_now = datetime.utcnow() + timedelta(hours=9)
+    today_str = kst_now.strftime("%Y-%m-%d") # "2026-03-24" 형식
+    
     url = f"https://api.notion.com/v1/databases/{DAILY_DB_ID}/query"
-    res = requests.post(url, headers=headers)
-    data = res.json()
+    
+    # 2. '날짜' 속성이 오늘인 데이터를 필터링
+    query_data = {
+        "filter": {
+            "property": "날짜",  # 사진에 있는 '날짜' 컬럼 이름
+            "date": {
+                "equals": today_str
+            }
+        }
+    }
+    
+    try:
+        res = requests.post(url, headers=headers, json=query_data)
+        data = res.json()
+        results = data.get("results", [])
 
-    for page in data.get("results", []):
-        title = get_title(page["properties"].get("이름"))
-        if today in title:
-            return page["id"]
-    return None
+        if results:
+            return results[0]["id"]
+        else:
+            print(f"📍 오늘 날짜({today_str})로 설정된 페이지를 찾지 못했습니다.")
+            return None
+    except Exception as e:
+        print(f"❌ 조회 중 오류 발생: {e}")
+        return None
 
 # 🚀 메인 API
 @app.post("/add")
@@ -134,13 +153,13 @@ def add_data(body: dict):
     data = {
         "parent": {"database_id": CONSUME_DB_ID},
         "properties": {
-            "Name": {"title": [{"text": {"content": merchant}}]},
+            "내역": {"title": [{"text": {"content": merchant}}]},
             "금액": {"number": amount},
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
             "날짜": {"date": {"start": datetime.now().isoformat()}},
-            "오늘": {"relation": [{"id": today_page_id}] if today_page_id else []}
+            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
         }
     }
 
