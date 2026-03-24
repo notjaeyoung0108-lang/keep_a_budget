@@ -42,7 +42,7 @@ def classify_category(text):
     )
     return res.choices[0].message.content.strip()
 
-# 💰 금액 추출 → 무조건 음수
+# 💰 금액 추출
 def extract_amount(text):
     nums = re.findall(r'\d[\d,]*', text)
     if not nums:
@@ -58,26 +58,44 @@ def detect_card(text):
         return "하나카드"
     return "기타"
 
-# 📂 카테고리 DB에서 ID 찾기
+# 🔐 안전하게 title 꺼내기
+def get_title(prop):
+    if not prop or "title" not in prop:
+        return ""
+    arr = prop["title"]
+    if not arr:
+        return ""
+    return arr[0].get("plain_text", "")
+
+# 🔐 안전하게 rich_text 꺼내기
+def get_rich_text(prop):
+    if not prop or "rich_text" not in prop:
+        return ""
+    arr = prop["rich_text"]
+    if not arr:
+        return ""
+    return arr[0].get("plain_text", "")
+
+# 📂 카테고리 ID 찾기
 def get_category_id(category_name):
     url = f"https://api.notion.com/v1/databases/{CATEGORY_DB_ID}/query"
     res = requests.post(url, headers=headers)
     data = res.json()
 
-    for page in data["results"]:
-        title = page["properties"]["이름"]["title"][0]["text"]["content"]
+    for page in data.get("results", []):
+        title = get_title(page["properties"].get("이름"))
         if title == category_name:
             return page["id"]
     return None
 
-# 💳 결제수단 DB에서 ID 찾기
+# 💳 결제수단 ID 찾기
 def get_payment_id(card_name):
     url = f"https://api.notion.com/v1/databases/{PAYMENT_DB_ID}/query"
     res = requests.post(url, headers=headers)
     data = res.json()
 
-    for page in data["results"]:
-        title = page["properties"]["이름"]["title"][0]["text"]["content"]
+    for page in data.get("results", []):
+        title = get_title(page["properties"].get("이름"))
         if title == card_name:
             return page["id"]
     return None
@@ -90,8 +108,8 @@ def get_today_page():
     res = requests.post(url, headers=headers)
     data = res.json()
 
-    for page in data["results"]:
-        title = page["properties"]["이름"]["title"][0]["text"]["content"]
+    for page in data.get("results", []):
+        title = get_title(page["properties"].get("이름"))
         if today in title:
             return page["id"]
     return None
@@ -102,9 +120,9 @@ def is_duplicate(text):
     res = requests.post(url, headers=headers)
     data = res.json()
 
-    for page in data["results"]:
-        stored = page["properties"]["원문"]["rich_text"]
-        if stored and text == stored[0]["text"]["content"]:
+    for page in data.get("results", []):
+        stored = get_rich_text(page["properties"].get("원문"))
+        if stored == text:
             return True
     return False
 
