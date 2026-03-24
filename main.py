@@ -189,7 +189,7 @@ def add_data(body: dict):
         "parent": {"database_id": CONSUME_DB_ID},
         "properties": {
             "내역": {"title": [{"text": {"content": display_name}}]}, # 변환된 이름 사용
-            "금액": {"number": amount},
+            "금액 (기입용)": {"number": amount},
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
