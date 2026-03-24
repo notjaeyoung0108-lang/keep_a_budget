@@ -30,7 +30,8 @@ headers = {
 def classify_category(text):
     prompt = f"""
 다음 소비 내역을 카테고리로 분류해.
-카테고리는 아래 중 하나만 선택:
+
+반드시 아래 단어 중 하나만 정확히 출력해 (설명 금지):
 식비, 카페, 교통, 쇼핑, 구독, 기타
 
 문자:
@@ -41,6 +42,13 @@ def classify_category(text):
         messages=[{"role": "user", "content": prompt}]
     )
     return res.choices[0].message.content.strip()
+
+# 🧼 GPT 결과 정리
+def clean_category(text):
+    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타"]:
+        if c in text:
+            return c
+    return "기타"
 
 # 💰 금액 추출
 def extract_amount(text):
@@ -58,7 +66,7 @@ def detect_card(text):
         return "하나카드"
     return "기타"
 
-# 🔐 안전하게 title 꺼내기
+# 🔐 안전한 title 추출
 def get_title(prop):
     if not prop or "title" not in prop:
         return ""
@@ -67,7 +75,7 @@ def get_title(prop):
         return ""
     return arr[0].get("plain_text", "")
 
-# 🔐 안전하게 rich_text 꺼내기
+# 🔐 안전한 rich_text 추출
 def get_rich_text(prop):
     if not prop or "rich_text" not in prop:
         return ""
@@ -138,7 +146,10 @@ def add_data(body: dict):
         return {"status": "duplicate"}
 
     amount = extract_amount(text)
-    category_name = classify_category(text)
+
+    category_raw = classify_category(text)
+    category_name = clean_category(category_raw)
+
     card = detect_card(text)
 
     category_id = get_category_id(category_name)
@@ -172,7 +183,21 @@ def add_data(body: dict):
         }
     }
 
-    requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
+    # 🔥 Notion 요청 (디버깅 포함)
+    res = requests.post(
+        "https://api.notion.com/v1/pages",
+        headers=headers,
+        json=data
+    )
+
+    print("NOTION STATUS:", res.status_code)
+    print("NOTION RESPONSE:", res.text)
+
+    if res.status_code != 200:
+        return {
+            "status": "notion_error",
+            "detail": res.text
+        }
 
     return {
         "status": "ok",
