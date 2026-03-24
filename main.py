@@ -159,7 +159,7 @@ def add_data(body: dict):
     data = {
         "parent": {"database_id": CONSUME_DB_ID},
         "properties": {
-            "이름": {
+            "내역": {
                 "title": [{"text": {"content": text[:20]}}]
             },
             "금액 (기입란)": {
@@ -177,7 +177,7 @@ def add_data(body: dict):
             "원문": {
                 "rich_text": [{"text": {"content": text}}]
             },
-            "오늘": {
+            "영수증": {
                 "relation": [{"id": today_page_id}] if today_page_id else []
             }
         }
