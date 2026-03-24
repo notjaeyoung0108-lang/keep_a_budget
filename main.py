@@ -50,7 +50,7 @@ def classify_category(merchant):
 다음 가맹점을 소비 카테고리로 분류해.
 
 반드시 아래 중 하나만 출력:
-식비, 카페, 교통, 쇼핑, 구독, 기타
+식비, 카페, 교통, 쇼핑, 구독, 취미, 통신, 기타
 
 가맹점:
 {merchant}
@@ -65,7 +65,7 @@ def classify_category(merchant):
         return "기타"
 
 def clean_category(text):
-    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타"]:
+    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "취미", "통신"]:
         if c in text:
             return c
     return "기타"
@@ -154,7 +154,7 @@ def add_data(body: dict):
         "parent": {"database_id": CONSUME_DB_ID},
         "properties": {
             "내역": {"title": [{"text": {"content": merchant}}]},
-            "금액": {"number": amount},
+            "금액 (기입란)": {"number": amount},
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
