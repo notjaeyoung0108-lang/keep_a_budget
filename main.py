@@ -65,8 +65,7 @@ def parse_sms(text):
     return merchant, amount, card
 
 def normalize_merchant(name):
-    name = name.lower()
-    name = re.sub(r"\s+", "", name)              # 공백 제거
+    name = name.lower()              
     name = re.sub(r"\(.*?\)", "", name)          # 괄호 제거
     name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
     return name
