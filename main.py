@@ -32,34 +32,35 @@ import re
 
 def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    
-    # 1. 케이뱅크 판별 및 파싱
+    merchant, amount, card = "알 수 없음", 0, "기타카드"
+
+    # 케이뱅크 판별
     if "[케이뱅크]" in text:
         card = "케이뱅크"
-        # '출금 100원'에서 숫자만 추출
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
-        # 마지막 줄이 가맹점
         merchant = lines[-1].split("_")[0]
 
-    # 2. 하나은행 판별 및 파싱
+    # 하나은행 판별
     elif "하나," in text:
         card = "하나카드"
-        # '출금100원'에서 숫자만 추출
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
-        # 하나은행은 '출금' 다음 줄(인덱스 4)이 가맹점, 그 다음이 잔액
-        # 만약 줄 순서가 바뀌더라도 대응하기 위해 잔액 앞 줄을 가져옴
-        merchant = ""
         for i, line in enumerate(lines):
             if "출금" in line:
-                merchant = lines[i+1] # 출금 바로 다음 줄이 가맹점
+                merchant = lines[i+1].split("_")[0]
                 break
-        merchant = merchant.split("_")[0]
 
-    else:
-        # 그 외의 경우 (예외 처리)
-        return "알 수 없음", 0, "기타카드"
+    # KB 국민은행 판별 (줄 바꿈 스타일 대응)
+    elif "[KB]" in text:
+        card = "국민은행"
+        for i, line in enumerate(lines):
+            if "출금" in line:
+                if i > 0: merchant = lines[i-1] # 출금 윗줄이 가맹점
+                if i + 1 < len(lines):
+                    amount_str = re.sub(r"[^\d]", "", lines[i+1])
+                    amount = int(amount_str) if amount_str else 0
+                break
 
     return merchant, amount, card
 
@@ -203,17 +204,12 @@ def add_data(body: dict):
         json=data
     )
 
-    print("STATUS:", res.status_code)
-    print("RESPONSE:", res.text)
-
-    return {
-        "status": "ok",
-        "merchant": merchant,
-        "amount": amount,
-        "card": card,
-        "category": category,
-        "spending_type": spending_type
-    }
+    print(f"✅ 노션 전송 상태: {res.status_code}")
+    if res.status_code == 200:
+        new_page_id = res.json().get("id")
+        print(f"🚀 생성된 페이지 ID: {new_page_id}")
+    else:
+        print(f"❌ 에러 발생: {res.text[:200]}")
     
 # 파일 맨 밑에 추가
 @app.get("/")
