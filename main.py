@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from openai import OpenAI
+from fastapi import BackgroundTasks
 
 load_dotenv()
 
@@ -211,20 +212,25 @@ def get_today_page():
 
 # 🚀 메인 API
 @app.post("/add")
-def add_data(body: dict):
+def add_data(body: dict, background_tasks: BackgroundTasks):
     text = body.get("text")
     if not text:
         return {"status": "no_text"}
 
+    # 👉 실제 작업을 함수로 분리
+    background_tasks.add_task(process_data, text)
+
+    # 👉 바로 응답
+    return {"status": "accepted"}
+
+def process_data(text: str):
     try:
         merchant, amount, card = parse_sms(text)
     except Exception as e:
-        return {"status": "parse_error", "detail": str(e)}
+        print("parse_error:", e)
+        return
 
-    # --- 여기서 매핑 정보를 적용합니다 ---
-    # 매핑 테이블에 있으면 이름을 바꾸고, 없으면 원래 이름을 씁니다.
     normalized = normalize_merchant(merchant)
-
     mapping = match_merchant(normalized)
 
     if mapping:
@@ -232,16 +238,12 @@ def add_data(body: dict):
         category = mapping["category"]
     else:
         display_name, category = gpt_extract(merchant)
-
-        # 🔥 자동 학습 (메모리처럼 동작)
         MERCHANT_MAP[normalized] = {
             "name": display_name,
             "category": category
         }
 
     category = clean_category(category)
-    # -----------------------------------
-
     amount = -abs(amount)
     spending_type = detect_spending_type(card)
 
@@ -253,7 +255,7 @@ def add_data(body: dict):
     data = {
         "parent": {"database_id": CONSUME_DB_ID},
         "properties": {
-            "내역": {"title": [{"text": {"content": display_name}}]}, # 변환된 이름 사용
+            "내역": {"title": [{"text": {"content": display_name}}]},
             "금액 (기입용)": {"number": amount},
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
@@ -262,19 +264,17 @@ def add_data(body: dict):
             "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
         }
     }
-    res = requests.post(
-        "https://api.notion.com/v1/pages",
-        headers=headers,
-        json=data
-    )
 
-    print(f"✅ 노션 전송 상태: {res.status_code}")
-    if res.status_code == 200:
-        new_page_id = res.json().get("id")
-        print(f"🚀 생성된 페이지 ID: {new_page_id}")
-    else:
-        print(f"❌ 에러 발생: {res.text[:200]}")
-    
+    try:
+        res = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=data
+        )
+        print("notion status:", res.status_code)
+    except Exception as e:
+        print("notion_error:", e)   
+ 
 # 파일 맨 밑에 추가
 @app.get("/ping")
 async def health_check():
