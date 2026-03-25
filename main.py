@@ -85,7 +85,7 @@ def gpt_extract(merchant):
 
 출력 형식:
 이름: (대표 이름 하나, 예: GS25, 스타벅스, 쿠팡 등)
-카테고리: (식비, 카페, 교통, 쇼핑, 구독, 취미, 통신, 기타 중 하나)
+카테고리: (식비, 카페, 교통, 쇼핑, 구독, 여가, 통신, 기타 중 하나)
 
 가맹점: {merchant}
 """
@@ -112,8 +112,13 @@ def gpt_extract(merchant):
 # "문자상의 이름": {"name": "노션에 표시할 이름", "category": "카테고리"}
 
 MERCHANT_MAP = {
-    "지에스25": {"name": "GS25", "category": "식비"},
-    "gs25": {"name": "GS25", "category": "식비"},
+    "롯데컬처웍스":{"name":"롯데시네마","category":"여가"},
+    "뚜레쥬르":{"name": "뚜레쥬르","category":"식비"},
+    "올리브영":{"name": "올리브영","category":"쇼핑"},
+    "CU":{"name": "CU 편의점", "category": "기타"},
+    "씨유":{"name": "CU 편의점", "category": "기타"},
+    "지에스25": {"name": "GS25 편의점", "category": "기타"},
+    "gs25": {"name": "GS25 편의점", "category": "기타"},
     "스타벅스": {"name": "스타벅스", "category": "카페"},
     "쿠팡": {"name": "쿠팡", "category": "쇼핑"},
     "(주) 리앤이라마띠네": {"name": "구내식당", "category": "식비"},
@@ -144,7 +149,7 @@ def classify_category(merchant):
     except:
         return "기타"
 def clean_category(text):
-    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "취미", "통신"]:
+    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "여가", "통신"]:
         if c in text:
             return c
     return "기타"
