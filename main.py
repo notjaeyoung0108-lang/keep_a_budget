@@ -214,3 +214,8 @@ def add_data(body: dict):
         "category": category,
         "spending_type": spending_type
     }
+    
+# 파일 맨 밑에 추가
+@app.get("/")
+async def health_check():
+    return {"status": "I'm alive!"}
