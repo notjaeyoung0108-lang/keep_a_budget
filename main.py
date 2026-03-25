@@ -64,17 +64,63 @@ def parse_sms(text):
 
     return merchant, amount, card
 
+def normalize_merchant(name):
+    name = name.lower()
+    name = re.sub(r"\s+", "", name)              # 공백 제거
+    name = re.sub(r"\(.*?\)", "", name)          # 괄호 제거
+    name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
+    return name
+
+
+def match_merchant(normalized_name):
+    for key in MERCHANT_MAP:
+        if key in normalized_name:
+            return MERCHANT_MAP[key]
+    return None
+
+
+def gpt_extract(merchant):
+    prompt = f"""
+다음 카드 가맹점 이름을 표준화하고 카테고리를 분류해.
+
+출력 형식:
+이름: (대표 이름 하나, 예: GS25, 스타벅스, 쿠팡 등)
+카테고리: (식비, 카페, 교통, 쇼핑, 구독, 취미, 통신, 기타 중 하나)
+
+가맹점: {merchant}
+"""
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = res.choices[0].message.content
+
+        name_match = re.search(r"이름:\s*(.*)", text)
+        cat_match = re.search(r"카테고리:\s*(.*)", text)
+
+        name = name_match.group(1).strip() if name_match else merchant
+        category = cat_match.group(1).strip() if cat_match else "기타"
+
+        return name, category
+    except Exception as e:
+        print(f"GPT 오류: {e}")
+        return merchant, "기타"
+
 # 🧠 카테고리 분류
 # 1. 가맹점 매핑 테이블 (상단에 추가)
 # "문자상의 이름": {"name": "노션에 표시할 이름", "category": "카테고리"}
+
 MERCHANT_MAP = {
+    "지에스25": {"name": "GS25", "category": "식비"},
+    "gs25": {"name": "GS25", "category": "식비"},
+    "스타벅스": {"name": "스타벅스", "category": "카페"},
+    "쿠팡": {"name": "쿠팡", "category": "쇼핑"},
     "(주) 리앤이라마띠네": {"name": "구내식당", "category": "식비"},
     "현대그린푸드": {"name": "구내식당", "category": "식비"},
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
-    # 필요할 때마다 여기에 추가만 하면 됩니다!
 }
-
 # 2. 카테고리 분류 함수 수정
 def classify_category(merchant):
     # 매핑 테이블에 있는지 먼저 확인
@@ -173,9 +219,23 @@ def add_data(body: dict):
 
     # --- 여기서 매핑 정보를 적용합니다 ---
     # 매핑 테이블에 있으면 이름을 바꾸고, 없으면 원래 이름을 씁니다.
-    mapping = MERCHANT_MAP.get(merchant)
-    display_name = mapping["name"] if mapping else merchant
-    category = clean_category(classify_category(merchant))
+    normalized = normalize_merchant(merchant)
+
+    mapping = match_merchant(normalized)
+
+    if mapping:
+        display_name = mapping["name"]
+        category = mapping["category"]
+    else:
+        display_name, category = gpt_extract(merchant)
+
+        # 🔥 자동 학습 (메모리처럼 동작)
+        MERCHANT_MAP[normalized] = {
+            "name": display_name,
+            "category": category
+        }
+
+    category = clean_category(category)
     # -----------------------------------
 
     amount = -abs(amount)
