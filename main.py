@@ -276,6 +276,6 @@ def add_data(body: dict):
         print(f"❌ 에러 발생: {res.text[:200]}")
     
 # 파일 맨 밑에 추가
-@app.get("/")
+@app.get("/", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "I'm alive!"}
