@@ -31,50 +31,16 @@ headers = {
 # 🔥 문자 파싱 함수
 import re
 
-def parse_sms(text, phone_date=None):
+def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     merchant, amount, card = "알 수 없음", 0, "기타카드"
-    
-    # 🕒 [시간 결정 우선순위]
-    # 1. 단축어가 보내준 시간(phone_date)을 기본값으로 사용
-    # 2. 만약 phone_date가 없으면 서버의 현재 한국 시간 사용
-    if phone_date:
-        transaction_time = phone_date
-    else:
-        kst_now = datetime.utcnow() + timedelta(hours=9)
-        transaction_time = kst_now.isoformat()
 
-    # --- KB 국민은행 파싱 ---
-    if "[KB]" in text:
-        card = "국민은행"
-        # 문자 내에 구체적인 시간이 있으면 그걸로 덮어씌움 (가장 정확하니까요!)
-        time_match = re.search(r"(\d{2}/\d{2})\s(\d{2}:\d{2})", text)
-        if time_match:
-            try:
-                year = datetime.now().year # 실제 운영시는 KST 기준 연도 권장
-                date_str = f"{year}/{time_match.group(1)} {time_match.group(2)}"
-                dt_obj = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
-                transaction_time = dt_obj.isoformat()
-            except:
-                pass
-
-        for i, line in enumerate(lines):
-            if "출금" in line:
-                if i > 0: merchant = lines[i-1]
-                if i + 1 < len(lines):
-                    amount_str = re.sub(r"[^\d]", "", lines[i+1])
-                    amount = int(amount_str) if amount_str else 0
-                break
-
-    # --- 케이뱅크 파싱 ---
-    elif "[케이뱅크]" in text:
+    if "[케이뱅크]" in text:
         card = "케이뱅크"
-        # 케이뱅크는 시간이 없으므로 transaction_time(단축어가 보낸 시간)을 그대로 씀
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
         merchant = lines[-1].split("_")[0]
 
-    # --- 하나카드 파싱 ---
     elif "하나," in text:
         card = "하나카드"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
@@ -84,7 +50,17 @@ def parse_sms(text, phone_date=None):
                 merchant = lines[i+1].split("_")[0]
                 break
 
-    return merchant, amount, card, transaction_time
+    elif "[KB]" in text:
+        card = "국민은행"
+        for i, line in enumerate(lines):
+            if "출금" in line:
+                if i > 0: merchant = lines[i-1]
+                if i + 1 < len(lines):
+                    amount_str = re.sub(r"[^\d]", "", lines[i+1])
+                    amount = int(amount_str) if amount_str else 0
+                break
+
+    return merchant, amount, card
 
 def normalize_merchant(name):
     name = name.lower()              
@@ -202,7 +178,7 @@ def get_relation_id(db_id, name):
 def get_today_page():
     # 1. 한국 시간 기준 오늘 날짜 생성 (Render 서버 시간 대응)
     # 현재 서버가 2026년이라면 이에 맞춰 작동합니다.
-    kst_now = datetime.utcnow() + timedelta(hours=9)
+    kst_now = datetime.utcnow() 
     today_str = kst_now.strftime("%Y-%m-%d") # "2026-03-24" 형식
     
     url = f"https://api.notion.com/v1/databases/{DAILY_DB_ID}/query"
@@ -234,64 +210,69 @@ def get_today_page():
 # 🚀 메인 API
 @app.post("/add")
 def add_data(body: dict, background_tasks: BackgroundTasks):
-    text = body.get("text")
-    phone_date = body.get("date") # 🎯 1. 단축어에서 보낸 'date' 추출
-    
-    if not text:
-        return {"status": "no_text"}
+    text = body.get("text")
+    if not text:
+        return {"status": "no_text"}
 
-    # 👉 작업을 백그라운드로 넘길 때 phone_date도 같이 넘겨줍니다.
-    background_tasks.add_task(process_data, text, phone_date)
+    # 👉 실제 작업을 함수로 분리
+    background_tasks.add_task(process_data, text)
 
-    # 👉 아이폰에는 "접수 완료!"라고 즉시 대답 (아이폰이 안 기다려도 됨)
-    return {"status": "accepted"}
+    # 👉 바로 응답
+    return {"status": "accepted"}
 
-def process_data(text: str, phone_date: str = None):
-    try:
-        # 🎯 2. parse_sms가 시간까지 반환하도록 수정 (아래 parse_sms 로직 참고)
-        merchant, amount, card, transaction_time = parse_sms(text, phone_date)
-    except Exception as e:
-        print("parse_error:", e)
-        return
+def process_data(text: str):
+    try:
+        merchant, amount, card = parse_sms(text)
+    except Exception as e:
+        print("parse_error:", e)
+        return
 
-    # --- (중간 로직: 매핑 및 GPT 분류 부분은 동일) ---
-    normalized = normalize_merchant(merchant)
-    mapping = match_merchant(normalized)
+    normalized = normalize_merchant(merchant)
+    mapping = match_merchant(normalized)
 
-    if mapping:
-        display_name = mapping["name"]
-        category = mapping["category"]
-    else:
-        # GPT 사용 시에도 merchant 정보를 넘김
-        display_name, category = gpt_extract(merchant)
-        # (옵션) MERCHANT_MAP에 자동 추가 로직 등...
+    if mapping:
+        display_name = mapping["name"]
+        category = mapping["category"]
+    else:
+        display_name, category = gpt_extract(merchant)
+        MERCHANT_MAP[normalized] = {
+            "name": display_name,
+            "category": category
+        }
 
-    # --- (중간 로직: ID 조회 부분 동일) ---
-    category = clean_category(category)
-    amount = -abs(amount)
-    spending_type = detect_spending_type(card)
+    category = clean_category(category)
+    amount = -abs(amount)
+    spending_type = detect_spending_type(card)
 
-    category_id = get_relation_id(CATEGORY_DB_ID, category)
-    payment_id = get_relation_id(PAYMENT_DB_ID, card)
-    spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
-    today_page_id = get_today_page()
+    category_id = get_relation_id(CATEGORY_DB_ID, category)
+    payment_id = get_relation_id(PAYMENT_DB_ID, card)
+    spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
+    today_page_id = get_today_page()
 
-    # 🎯 3. 노션 데이터의 "날짜" 부분에 추출된 시간 사용
-    data = {
-        "parent": {"database_id": CONSUME_DB_ID},
-        "properties": {
-            "내역": {"title": [{"text": {"content": display_name}}]},
-            "금액 (기입용)": {"number": amount},
-            "카테고리": {"relation": [{"id": category_id}] if category_id else []},
-            "결제_수단": {"relation": [{"id": payment_id}] if payment_id else []},
-            "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
-            "날짜": {"date": {"start": transaction_time}}, # ⬅️ datetime.now() 대신 사용!
-            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
-        }
-    }
+    data = {
+        "parent": {"database_id": CONSUME_DB_ID},
+        "properties": {
+            "내역": {"title": [{"text": {"content": display_name}}]},
+            "금액 (기입용)": {"number": amount},
+            "카테고리": {"relation": [{"id": category_id}] if category_id else []},
+            "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
+            "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
+            "날짜": {"date": {"start": datetime.now().isoformat()}},
+            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
+        }
+    }
 
-    try:
-        res = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
-        print(f"✅ 노션 전송 성공! ({display_name}, {transaction_time})")
-    except Exception as e:
-        print("notion_error:", e)
+    try:
+        res = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=data
+        )
+        print("notion status:", res.status_code)
+    except Exception as e:
+        print("notion_error:", e)   
+ 
+# 파일 맨 밑에 추가
+@app.get("/ping")
+async def health_check():
+    return {"status": "I'm alive!"}
