@@ -121,7 +121,7 @@ MERCHANT_MAP = {
     "gs25": {"name": "GS25 편의점", "category": "기타"},
     "스타벅스": {"name": "스타벅스", "category": "카페"},
     "쿠팡": {"name": "쿠팡", "category": "쇼핑"},
-    "(주) 리앤이라마띠네": {"name": "구내식당", "category": "식비"},
+    "리앤이라마띠네": {"name": "구내식당", "category": "식비"},
     "현대그린푸드": {"name": "구내식당", "category": "식비"},
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
