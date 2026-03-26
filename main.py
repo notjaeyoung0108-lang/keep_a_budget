@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -35,12 +35,14 @@ def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     merchant, amount, card = "알 수 없음", 0, "기타카드"
 
+    # 케이뱅크 판별
     if "[케이뱅크]" in text:
         card = "케이뱅크"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
         merchant = lines[-1].split("_")[0]
 
+    # 하나은행 판별
     elif "하나," in text:
         card = "하나카드"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
@@ -50,11 +52,12 @@ def parse_sms(text):
                 merchant = lines[i+1].split("_")[0]
                 break
 
+    # KB 국민은행 판별 (줄 바꿈 스타일 대응)
     elif "[KB]" in text:
         card = "국민은행"
         for i, line in enumerate(lines):
             if "출금" in line:
-                if i > 0: merchant = lines[i-1]
+                if i > 0: merchant = lines[i-1] # 출금 윗줄이 가맹점
                 if i + 1 < len(lines):
                     amount_str = re.sub(r"[^\d]", "", lines[i+1])
                     amount = int(amount_str) if amount_str else 0
@@ -118,7 +121,7 @@ MERCHANT_MAP = {
     "gs25": {"name": "GS25 편의점", "category": "기타"},
     "스타벅스": {"name": "스타벅스", "category": "카페"},
     "쿠팡": {"name": "쿠팡", "category": "쇼핑"},
-    "리앤이라마띠네": {"name": "구내식당", "category": "식비"},
+    "(주) 리앤이라마띠네": {"name": "구내식당", "category": "식비"},
     "현대그린푸드": {"name": "구내식당", "category": "식비"},
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
@@ -178,8 +181,9 @@ def get_relation_id(db_id, name):
 def get_today_page():
     # 1. 한국 시간 기준 오늘 날짜 생성 (Render 서버 시간 대응)
     # 현재 서버가 2026년이라면 이에 맞춰 작동합니다.
-    kst_now = datetime.utcnow() 
-    today_str = kst_now.strftime("%Y-%m-%d") # "2026-03-24" 형식
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst) 
+    today_str = now_kst.strftime("%Y-%m-%d") # "2026-03-24" 형식
     
     url = f"https://api.notion.com/v1/databases/{DAILY_DB_ID}/query"
     
@@ -210,69 +214,71 @@ def get_today_page():
 # 🚀 메인 API
 @app.post("/add")
 def add_data(body: dict, background_tasks: BackgroundTasks):
-    text = body.get("text")
-    if not text:
-        return {"status": "no_text"}
+    text = body.get("text")
+    if not text:
+        return {"status": "no_text"}
 
-    # 👉 실제 작업을 함수로 분리
-    background_tasks.add_task(process_data, text)
+    # 👉 실제 작업을 함수로 분리
+    background_tasks.add_task(process_data, text)
 
-    # 👉 바로 응답
-    return {"status": "accepted"}
+    # 👉 바로 응답
+    return {"status": "accepted"}
 
 def process_data(text: str):
-    try:
-        merchant, amount, card = parse_sms(text)
-    except Exception as e:
-        print("parse_error:", e)
-        return
+    try:
+        merchant, amount, card = parse_sms(text)
+    except Exception as e:
+        print("parse_error:", e)
+        return
 
-    normalized = normalize_merchant(merchant)
-    mapping = match_merchant(normalized)
+    normalized = normalize_merchant(merchant)
+    mapping = match_merchant(normalized)
 
-    if mapping:
-        display_name = mapping["name"]
-        category = mapping["category"]
-    else:
-        display_name, category = gpt_extract(merchant)
-        MERCHANT_MAP[normalized] = {
-            "name": display_name,
-            "category": category
-        }
+    if mapping:
+        display_name = mapping["name"]
+        category = mapping["category"]
+    else:
+        display_name, category = gpt_extract(merchant)
+        MERCHANT_MAP[normalized] = {
+            "name": display_name,
+            "category": category
+        }
 
-    category = clean_category(category)
-    amount = -abs(amount)
-    spending_type = detect_spending_type(card)
+    category = clean_category(category)
+    amount = -abs(amount)
+    spending_type = detect_spending_type(card)
 
-    category_id = get_relation_id(CATEGORY_DB_ID, category)
-    payment_id = get_relation_id(PAYMENT_DB_ID, card)
-    spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
-    today_page_id = get_today_page()
+    category_id = get_relation_id(CATEGORY_DB_ID, category)
+    payment_id = get_relation_id(PAYMENT_DB_ID, card)
+    spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
+    today_page_id = get_today_page()
+    
+    kst = timezone(timedelta(hours=9))
 
-    data = {
-        "parent": {"database_id": CONSUME_DB_ID},
-        "properties": {
-            "내역": {"title": [{"text": {"content": display_name}}]},
-            "금액 (기입용)": {"number": amount},
-            "카테고리": {"relation": [{"id": category_id}] if category_id else []},
-            "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
-            "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
-            "날짜": {"date": {"start": datetime.now().isoformat()}},
-            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
-        }
-    }
+    data = {
+        "parent": {"database_id": CONSUME_DB_ID},
+        "properties": {
+            "내역": {"title": [{"text": {"content": display_name}}]},
+            "금액 (기입용)": {"number": amount},
+            "카테고리": {"relation": [{"id": category_id}] if category_id else []},
+            "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
+            "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
+            "날짜": {"date": {"start": datetime.now(kst).isoformat()}},
+            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
+        }
+    }
 
-    try:
-        res = requests.post(
-            "https://api.notion.com/v1/pages",
-            headers=headers,
-            json=data
-        )
-        print("notion status:", res.status_code)
-    except Exception as e:
-        print("notion_error:", e)   
- 
+    try:
+        res = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=data
+        )
+        print("notion status:", res.status_code)
+    except Exception as e:
+        print("notion_error:", e)   
+ 
 # 파일 맨 밑에 추가
 @app.get("/ping")
 async def health_check():
-    return {"status": "I'm alive!"}
+    return {"status": "I'm alive!"}
