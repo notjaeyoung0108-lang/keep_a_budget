@@ -66,8 +66,7 @@ def parse_sms(text):
     return merchant, amount, card
 
 def normalize_merchant(name):
-    name = name.lower()              
-    name = re.sub(r"\(.*?\)", "", name)          # 괄호 제거
+    name = name.lower()                  
     name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
     return name
 
@@ -112,6 +111,7 @@ def gpt_extract(merchant):
 # "문자상의 이름": {"name": "노션에 표시할 이름", "category": "카테고리"}
 
 MERCHANT_MAP = {
+    "위대한상상":{"name":"요기요","category":"식비"},
     "롯데컬처웍스":{"name":"롯데시네마","category":"여가"},
     "뚜레쥬르":{"name": "뚜레쥬르","category":"식비"},
     "올리브영":{"name": "올리브영","category":"쇼핑"},
