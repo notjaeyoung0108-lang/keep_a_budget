@@ -276,8 +276,10 @@ def process_data(text: str, date: str):
             json=data
         )
         print("notion status:", res.status_code)
+        print("date:", date)
     except Exception as e:
         print("notion_error:", e)   
+        print("date:", date)
  
 # 파일 맨 밑에 추가
 @app.get("/ping")
