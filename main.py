@@ -226,6 +226,9 @@ def add_data(body: dict, background_tasks: BackgroundTasks):
     return {"status": "accepted"}
 
 def process_data(text: str, date: str):
+    print("🔥 process 시작")
+    print("📩 text:", text)
+    print("📅 date:", date)
     try:
         merchant, amount, card = parse_sms(text)
     except Exception as e:
@@ -276,10 +279,12 @@ def process_data(text: str, date: str):
             json=data
         )
         print("notion status:", res.status_code)
-        print("date:", date)
+        print("📩 body text:", text)
+        print("📅 date:", date)
     except Exception as e:
         print("notion_error:", e)   
-        print("date:", date)
+        print("📩 body text:", text)
+        print("📅 date:", date)
  
 # 파일 맨 밑에 추가
 @app.get("/ping")
