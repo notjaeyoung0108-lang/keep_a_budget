@@ -215,16 +215,17 @@ def get_today_page():
 @app.post("/add")
 def add_data(body: dict, background_tasks: BackgroundTasks):
     text = body.get("text")
+    date = body.get("date")
     if not text:
         return {"status": "no_text"}
 
     # 👉 실제 작업을 함수로 분리
-    background_tasks.add_task(process_data, text)
+    background_tasks.add_task(process_data, text, date)
 
     # 👉 바로 응답
     return {"status": "accepted"}
 
-def process_data(text: str):
+def process_data(text: str, date: str):
     try:
         merchant, amount, card = parse_sms(text)
     except Exception as e:
@@ -263,7 +264,7 @@ def process_data(text: str):
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
-            "날짜": {"date": {"start": (datetime.now(kst) - timedelta(minutes=5)).isoformat()}},
+            "날짜": {"date": {"start": date}},
             "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
         }
     }
