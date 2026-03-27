@@ -111,7 +111,8 @@ def gpt_extract(merchant):
 # "문자상의 이름": {"name": "노션에 표시할 이름", "category": "카테고리"}
 
 MERCHANT_MAP = {
-    "위대한상상":{"name":"요기요","category":"식비"},
+    "우아한형제들":{"name":"배달앱(배달의민족)","category":"식비"},
+    "위대한상상":{"name":"배달앱(요기요)","category":"식비"},
     "롯데컬처웍스":{"name":"롯데시네마","category":"여가"},
     "뚜레쥬르":{"name": "뚜레쥬르","category":"식비"},
     "올리브영":{"name": "올리브영","category":"쇼핑"},
@@ -125,13 +126,19 @@ MERCHANT_MAP = {
     "현대그린푸드": {"name": "구내식당", "category": "식비"},
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
+    "쿠팡이츠": {"name": "쿠팡이츠", "category": "식비"},
+    "다이소": {"name": "다이소", "category": "쇼핑"},
+    "씨제이씨지브이": {"name": "CGV", "category": "여가"},
 }
 # 2. 카테고리 분류 함수 수정
 def classify_category(merchant):
     # 매핑 테이블에 있는지 먼저 확인
-    if merchant in MERCHANT_MAP:
-        print(f"✅ 매핑 데이터 발견: {merchant} -> {MERCHANT_MAP[merchant]['category']}")
-        return MERCHANT_MAP[merchant]["category"]
+    normalized = normalize_merchant(merchant) # +1줄
+    
+    for key in MERCHANT_MAP:
+        if key in normalized:  # 이 한 줄만 바꿈!
+            print(f"✅ 매핑 데이터 발견: {merchant} -> {MERCHANT_MAP[key]['category']}")
+            return MERCHANT_MAP[key]["category"]
 
     # 매핑에 없으면 기존처럼 GPT에게 물어보기
     prompt = f"""
