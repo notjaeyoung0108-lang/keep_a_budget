@@ -72,11 +72,13 @@ def normalize_merchant(name):
 
 
 def match_merchant(normalized_name):
+    # MERCHANT_MAP의 key들이 normalized_name 안에 포함되어 있는지 확인
     for key in MERCHANT_MAP:
+        # 예: normalized_name이 "스타벅스강남점"이고 key가 "스타벅스"라면 매칭 성공
         if key in normalized_name:
+            print(f"✅ 부분 일치 매핑 발견: {normalized_name} -> {MERCHANT_MAP[key]['name']}")
             return MERCHANT_MAP[key]
     return None
-
 
 def gpt_extract(merchant):
     prompt = f"""
@@ -115,13 +117,13 @@ MERCHANT_MAP = {
     "롯데컬처웍스":{"name":"롯데시네마","category":"여가"},
     "뚜레쥬르":{"name": "뚜레쥬르","category":"식비"},
     "올리브영":{"name": "올리브영","category":"쇼핑"},
-    "CU":{"name": "CU 편의점", "category": "기타"},
-    "씨유":{"name": "CU 편의점", "category": "기타"},
-    "지에스25": {"name": "GS25 편의점", "category": "기타"},
-    "gs25": {"name": "GS25 편의점", "category": "기타"},
+    "CU":{"name": "CU", "category": "기타"},
+    "씨유":{"name": "CU", "category": "기타"},
+    "지에스25": {"name": "GS25", "category": "기타"},
+    "gs25": {"name": "GS25", "category": "기타"},
     "스타벅스": {"name": "스타벅스", "category": "카페"},
     "쿠팡": {"name": "쿠팡", "category": "쇼핑"},
-    "(주) 리앤이라마띠네": {"name": "구내식당", "category": "식비"},
+    "리앤이라마띠네": {"name": "구내식당", "category": "식비"},
     "현대그린푸드": {"name": "구내식당", "category": "식비"},
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
@@ -213,16 +215,29 @@ def get_today_page():
 
 # 🚀 메인 API
 @app.post("/add")
-def add_data(body: dict):
+def add_data(body: dict, background_tasks: BackgroundTasks):
     text = body.get("text")
     date = body.get("date")
 
     if not text:
         return {"status": "no_text"}
 
-    process_data(text, date)  # 👈 바로 실행
+    # 👉 date 방어 (핵심)
+    if not date:
+        kst = timezone(timedelta(hours=9))
+        date = datetime.now(kst).isoformat()
 
-    return {"status": "done"}
+    # 👉 백그라운드 실행
+    background_tasks.add_task(safe_process_data, text, date)
+
+    return {"status": "accepted"}
+
+def safe_process_data(text: str, date: str):
+    try:
+        print("🔥 BG task 시작")
+        process_data(text, date)
+    except Exception as e:
+        print("💥 BG task 에러:", e)
 
 def process_data(text: str, date: str):
     print("🔥 process 시작")
@@ -241,12 +256,11 @@ def process_data(text: str, date: str):
         display_name = mapping["name"]
         category = mapping["category"]
     else:
+        # 매핑에 없을 때만 GPT 호출
         display_name, category = gpt_extract(merchant)
-        MERCHANT_MAP[normalized] = {
-            "name": display_name,
-            "category": category
-        }
-
+        # 새로운 가맹점을 맵에 추가 (선택 사항: 다음번엔 GPT 안 쓰도록 저장)
+        # MERCHANT_MAP[normalized] = {"name": display_name, "category": category}
+    
     category = clean_category(category)
     amount = -abs(amount)
     spending_type = detect_spending_type(card)
