@@ -213,17 +213,16 @@ def get_today_page():
 
 # 🚀 메인 API
 @app.post("/add")
-def add_data(body: dict, background_tasks: BackgroundTasks):
+def add_data(body: dict):
     text = body.get("text")
     date = body.get("date")
+
     if not text:
         return {"status": "no_text"}
 
-    # 👉 실제 작업을 함수로 분리
-    background_tasks.add_task(process_data, text, date)
+    process_data(text, date)  # 👈 바로 실행
 
-    # 👉 바로 응답
-    return {"status": "accepted"}
+    return {"status": "done"}
 
 def process_data(text: str, date: str):
     print("🔥 process 시작")
