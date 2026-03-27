@@ -263,7 +263,7 @@ def process_data(text: str):
             "카테고리": {"relation": [{"id": category_id}] if category_id else []},
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
-            "날짜": {"date": {"start": datetime.now(kst).isoformat()}},
+            "날짜": {"date": {"start": (datetime.now(kst) - timedelta(minutes=5)).isoformat()}},
             "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
         }
     }
