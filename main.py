@@ -215,22 +215,49 @@ def get_today_page():
 
 # 🚀 메인 API
 @app.post("/add")
-def add_data(body: dict, background_tasks: BackgroundTasks):
+def add_data(body: dict):  # 👈 BackgroundTasks 파라미터 삭제
+    import sys
+    
+    print("=" * 50, flush=True)
+    print(f"📥 /add 호출됨", flush=True)
+    print(f"body: {body}", flush=True)
+    sys.stdout.flush()
+    
     text = body.get("text")
     date = body.get("date")
 
     if not text:
+        print("❌ text 없음", flush=True)
         return {"status": "no_text"}
 
-    # 👉 date 방어 (핵심)
-    if not date:
+    # 날짜 방어 강화
+    if not date or date.strip() == "":  # 👈 빈 문자열도 체크
+        print("⚠️ date 없음 또는 빈값 → 현재시각 사용", flush=True)
         kst = timezone(timedelta(hours=9))
         date = datetime.now(kst).isoformat()
+    else:
+        print(f"📅 받은 date: {date}", flush=True)
+        # yyyy-MM-dd HH:mm 형식을 ISO로 변환
+        try:
+            kst = timezone(timedelta(hours=9))
+            dt = datetime.strptime(date, "%Y-%m-%d %H:%M")
+            date = dt.replace(tzinfo=kst).isoformat()
+            print(f"✅ ISO 변환: {date}", flush=True)
+        except Exception as e:
+            print(f"❌ 날짜 변환 실패: {e}", flush=True)
+            date = datetime.now(kst).isoformat()
 
-    # 👉 백그라운드 실행
-    background_tasks.add_task(safe_process_data, text, date)
-
-    return {"status": "accepted"}
+    # 👇 백그라운드 말고 바로 실행
+    try:
+        print("🚀 process_data 시작", flush=True)
+        process_data(text, date)
+        print("✅ 완료!", flush=True)
+        return {"status": "success"}
+    except Exception as e:
+        print(f"💥 에러: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
 def safe_process_data(text: str, date: str):
     try:
