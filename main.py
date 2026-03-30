@@ -65,19 +65,40 @@ def parse_sms(text):
 
     return merchant, amount, card
 
-def normalize_merchant(name):
-    name = name.lower()                  
-    name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
-    return name
+#def normalize_merchant(name):
+#    name = name.lower()                  
+#    name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
+#    return name
 
 
-def match_merchant(normalized_name):
+#def match_merchant(normalized_name):
     # MERCHANT_MAP의 key들이 normalized_name 안에 포함되어 있는지 확인
-    for key in MERCHANT_MAP:
+#    for key in MERCHANT_MAP:
         # 예: normalized_name이 "스타벅스강남점"이고 key가 "스타벅스"라면 매칭 성공
-        if key in normalized_name:
-            print(f"✅ 부분 일치 매핑 발견: {normalized_name} -> {MERCHANT_MAP[key]['name']}")
+#        if key in normalized_name:
+#            print(f"✅ 부분 일치 매핑 발견: {normalized_name} -> {MERCHANT_MAP[key]['name']}")
+#            return MERCHANT_MAP[key]
+#    return None
+
+def match_merchant(merchant):
+    """
+    가맹점 이름에 MERCHANT_MAP의 키워드가 포함되어 있으면 매칭
+    예: "스타벅스강남점" → "스타벅스" 매칭
+        "GS25 역삼점" → "GS25" 매칭
+    """
+    # 대소문자 구분 없이 비교하기 위해 소문자로 변환
+    merchant_lower = merchant.lower()
+    
+    # MERCHANT_MAP의 모든 키를 확인
+    for key in MERCHANT_MAP:
+        key_lower = key.lower()
+        
+        # 가맹점 이름에 키워드가 포함되어 있으면
+        if key_lower in merchant_lower:
+            print(f"✅ 매칭 성공: '{merchant}' → '{MERCHANT_MAP[key]['name']}' (키워드: '{key}')", flush=True)
             return MERCHANT_MAP[key]
+    
+    print(f"❌ 매칭 실패: '{merchant}' (GPT 사용)", flush=True)
     return None
 
 def gpt_extract(merchant):
@@ -267,26 +288,30 @@ def safe_process_data(text: str, date: str):
         print("💥 BG task 에러:", e)
 
 def process_data(text: str, date: str):
-    print("🔥 process 시작")
-    print("📩 text:", text)
-    print("📅 date:", date)
+    print("🔥 process 시작", flush=True)
+    print("📩 text:", text, flush=True)
+    print("📅 date:", date, flush=True)
+    
     try:
         merchant, amount, card = parse_sms(text)
+        print(f"🏪 파싱된 가맹점: '{merchant}'", flush=True)  # 👈 추가
     except Exception as e:
-        print("parse_error:", e)
+        print("parse_error:", e, flush=True)
         return
 
-    normalized = normalize_merchant(merchant)
-    mapping = match_merchant(normalized)
+    # 👇 정규화 제거하고 바로 매칭
+    mapping = match_merchant(merchant)  # normalize 안 함!
 
     if mapping:
         display_name = mapping["name"]
         category = mapping["category"]
+        print(f"✅ 매핑 사용: {display_name} / {category}", flush=True)
     else:
         # 매핑에 없을 때만 GPT 호출
         display_name, category = gpt_extract(merchant)
-        # 새로운 가맹점을 맵에 추가 (선택 사항: 다음번엔 GPT 안 쓰도록 저장)
-        # MERCHANT_MAP[normalized] = {"name": display_name, "category": category}
+        print(f"🧠 GPT 분류: {display_name} / {category}", flush=True)
+        print(f"💡 [MERCHANT_MAP 추가 추천]", flush=True)
+        print(f"    \"{merchant}\": {{\"name\": \"{display_name}\", \"category\": \"{category}\"}},", flush=True)
     
     category = clean_category(category)
     amount = -abs(amount)
