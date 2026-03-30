@@ -136,8 +136,8 @@ def gpt_extract(merchant):
 
 MERCHANT_MAP = {
     "LG유플러스":{"name":"통신요금","category":"구독"},
-    "네이버멤버십":{"name":"네이버멤버십,"category":"구독"},
-    "와우멤버십":{"name":"쿠팡(와우멤버십),"category":"구독"},
+    "네이버멤버십":{"name":"네이버멤버십","category":"구독"},
+    "와우멤버십":{"name":"쿠팡(와우멤버십)","category":"구독"},
     "위대한상상":{"name":"요기요","category":"식비"},
     "롯데컬처웍스":{"name":"롯데시네마","category":"여가"},
     "뚜레쥬르":{"name": "뚜레쥬르","category":"식비"},
@@ -163,7 +163,7 @@ def classify_category(merchant):
     # 매핑에 없으면 기존처럼 GPT에게 물어보기
     prompt = f"""
 다음 가맹점을 소비 카테고리로 분류해.
-반드시 아래 중 하나만 출력: 식비, 카페, 교통, 쇼핑, 구독, 취미, 기타
+반드시 아래 중 하나만 출력: 식비, 카페, 교통, 쇼핑, 구독, 여가/문화, 기타
 
 가맹점: {merchant}
 """
@@ -176,7 +176,7 @@ def classify_category(merchant):
     except:
         return "기타"
 def clean_category(text):
-    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "여가"]:
+    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "여가/문화"]:
         if c in text:
             return c
     return "기타"
