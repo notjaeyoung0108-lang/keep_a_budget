@@ -19,6 +19,7 @@ PAYMENT_DB_ID = os.getenv("PAYMENT_DB_ID")
 SPENDING_DB_ID = os.getenv("SPENDING_DB_ID")
 DAILY_DB_ID = os.getenv("DAILY_DB_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MONTHLY_DB_ID = os.getenv("MONTHLY_DB_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -234,9 +235,68 @@ def get_today_page():
         print(f"❌ 조회 중 오류 발생: {e}")
         return None
 
+def get_or_create_monthly_page(year: int, month: int):
+    """
+    해당 년월의 월별명세 페이지를 찾거나 새로 만듦
+    """
+    title = f"{year}년 {month}월"
+    
+    # 1. 이미 있는지 확인
+    url = f"https://api.notion.com/v1/databases/{MONTHLY_DB_ID}/query"
+    query = {
+        "filter": {
+            "and": [
+                {
+                    "property": "년도",
+                    "number": {
+                        "equals": year
+                    }
+                },
+                {
+                    "property": "월",
+                    "number": {
+                        "equals": month
+                    }
+                }
+            ]
+        }
+    }
+    
+    try:
+        res = requests.post(url, headers=headers, json=query)
+        data = res.json()
+        results = data.get("results", [])
+        
+        if results:
+            print(f"✅ 기존 월별명세 발견: {title}", flush=True)
+            return results[0]["id"]
+        
+        # 2. 없으면 새로 생성
+        print(f"🆕 새 월별명세 생성: {title}", flush=True)
+        create_data = {
+            "parent": {"database_id": MONTHLY_DB_ID},
+            "properties": {
+                "제목": {"title": [{"text": {"content": title}}]},
+                "년도": {"number": year},
+                "월": {"number": month}
+            }
+        }
+        
+        create_res = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=create_data
+        )
+        
+        return create_res.json()["id"]
+        
+    except Exception as e:
+        print(f"❌ 월별명세 처리 오류: {e}", flush=True)
+        return None
+
 # 🚀 메인 API
 @app.post("/add")
-def add_data(body: dict):  # 👈 BackgroundTasks 파라미터 삭제
+def add_data(body: dict):
     import sys
     
     print("=" * 50, flush=True)
@@ -252,7 +312,7 @@ def add_data(body: dict):  # 👈 BackgroundTasks 파라미터 삭제
         return {"status": "no_text"}
 
     # 날짜 방어 강화
-    if not date or date.strip() == "":  # 👈 빈 문자열도 체크
+    if not date or date.strip() == "":
         print("⚠️ date 없음 또는 빈값 → 현재시각 사용", flush=True)
         kst = timezone(timedelta(hours=9))
         date = datetime.now(kst).isoformat()
@@ -266,9 +326,10 @@ def add_data(body: dict):  # 👈 BackgroundTasks 파라미터 삭제
             print(f"✅ ISO 변환: {date}", flush=True)
         except Exception as e:
             print(f"❌ 날짜 변환 실패: {e}", flush=True)
+            kst = timezone(timedelta(hours=9))  # 👈 여기!
             date = datetime.now(kst).isoformat()
 
-    # 👇 백그라운드 말고 바로 실행
+    # 백그라운드 말고 바로 실행
     try:
         print("🚀 process_data 시작", flush=True)
         process_data(text, date)
@@ -294,20 +355,19 @@ def process_data(text: str, date: str):
     
     try:
         merchant, amount, card = parse_sms(text)
-        print(f"🏪 파싱된 가맹점: '{merchant}'", flush=True)  # 👈 추가
+        print(f"🏪 파싱된 가맹점: '{merchant}'", flush=True)
     except Exception as e:
         print("parse_error:", e, flush=True)
         return
 
-    # 👇 정규화 제거하고 바로 매칭
-    mapping = match_merchant(merchant)  # normalize 안 함!
+    # 👇 매칭 (한 번만!)
+    mapping = match_merchant(merchant)
 
     if mapping:
         display_name = mapping["name"]
         category = mapping["category"]
         print(f"✅ 매핑 사용: {display_name} / {category}", flush=True)
     else:
-        # 매핑에 없을 때만 GPT 호출
         display_name, category = gpt_extract(merchant)
         print(f"🧠 GPT 분류: {display_name} / {category}", flush=True)
         print(f"💡 [MERCHANT_MAP 추가 추천]", flush=True)
@@ -322,7 +382,13 @@ def process_data(text: str, date: str):
     spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
     today_page_id = get_today_page()
     
-    kst = timezone(timedelta(hours=9))
+    # 👇 날짜에서 년/월 추출
+    dt = datetime.fromisoformat(date)
+    year = dt.year
+    month = dt.month
+    
+    # 👇 월별명세 페이지 가져오기/생성
+    monthly_page_id = get_or_create_monthly_page(year, month)
 
     data = {
         "parent": {"database_id": CONSUME_DB_ID},
@@ -333,7 +399,8 @@ def process_data(text: str, date: str):
             "결제수단": {"relation": [{"id": payment_id}] if payment_id else []},
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
             "날짜": {"date": {"start": date}},
-            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []}
+            "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []},
+            "월별명세": {"relation": [{"id": monthly_page_id}] if monthly_page_id else []}  # 👈 월별명세 추가!
         }
     }
 
@@ -343,14 +410,12 @@ def process_data(text: str, date: str):
             headers=headers,
             json=data
         )
-        print("notion status:", res.status_code)
-        print("📩 body text:", text)
-        print("📅 date:", date)
+        print("notion status:", res.status_code, flush=True)
+        print("📊 월별명세 연결: " + (f"{year}년 {month}월" if monthly_page_id else "실패"), flush=True)
     except Exception as e:
-        print("notion_error:", e)   
-        print("📩 body text:", text)
-        print("📅 date:", date)
- 
+        print("notion_error:", e, flush=True)
+
+
 # 파일 맨 밑에 추가
 @app.get("/ping")
 async def health_check():
