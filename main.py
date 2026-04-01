@@ -35,14 +35,14 @@ import re
 def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     merchant, amount, card = "알 수 없음", 0, "기타카드"
-
+    
     # 케이뱅크 판별
     if "[케이뱅크]" in text:
         card = "케이뱅크"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
         merchant = lines[-1].split("_")[0]
-
+    
     # 하나은행 판별
     elif "하나," in text:
         card = "하나카드"
@@ -52,18 +52,33 @@ def parse_sms(text):
             if "출금" in line:
                 merchant = lines[i+1].split("_")[0]
                 break
-
+    
     # KB 국민은행 판별 (줄 바꿈 스타일 대응)
     elif "[KB]" in text:
         card = "국민은행"
         for i, line in enumerate(lines):
             if "출금" in line:
-                if i > 0: merchant = lines[i-1] # 출금 윗줄이 가맹점
+                if i > 0: 
+                    merchant = lines[i-1]  # 출금 윗줄이 가맹점
                 if i + 1 < len(lines):
                     amount_str = re.sub(r"[^\d]", "", lines[i+1])
                     amount = int(amount_str) if amount_str else 0
                 break
-
+    
+    # 현대카드 판별
+    elif "현대카드" in text:
+        card = "현대카드"
+        # 금액 추출: "7,600원" 형태
+        amount_match = re.search(r"([\d,]+)원", text)
+        amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
+        
+        # 가맹점 추출: 날짜/시간 다음 줄
+        for i, line in enumerate(lines):
+            if re.match(r"\d{2}/\d{2}\s+\d{2}:\d{2}", line):  # "04/01 08:48" 형태
+                if i + 1 < len(lines):
+                    merchant = lines[i+1]
+                break
+    
     return merchant, amount, card
 
 #def normalize_merchant(name):
@@ -184,6 +199,8 @@ def clean_category(text):
 def detect_spending_type(card):
     if "케이뱅크" in card:
         return "데이트자금"
+    elif "현대카드" in card:
+        return "과소비"
     return "생활자금"
 
 def get_title(prop):
