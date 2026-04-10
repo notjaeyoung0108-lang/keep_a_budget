@@ -3,6 +3,7 @@ import re
 import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from openai import OpenAI
 from fastapi import BackgroundTasks
@@ -30,20 +31,16 @@ headers = {
 }
 
 # 🔥 문자 파싱 함수
-import re
-
 def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     merchant, amount, card = "알 수 없음", 0, "기타카드"
     
-    # 케이뱅크 판별
     if "[케이뱅크]" in text:
         card = "케이뱅크"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
         merchant = lines[-1].split("_")[0]
     
-    # 하나은행 판별
     elif "하나," in text:
         card = "하나카드"
         amount_match = re.search(r"출금\s*([\d,]+)원", text)
@@ -53,63 +50,35 @@ def parse_sms(text):
                 merchant = lines[i+1].split("_")[0]
                 break
     
-    # KB 국민은행 판별 (줄 바꿈 스타일 대응)
     elif "[KB]" in text:
         card = "국민은행"
         for i, line in enumerate(lines):
             if "출금" in line:
                 if i > 0: 
-                    merchant = lines[i-1]  # 출금 윗줄이 가맹점
+                    merchant = lines[i-1]
                 if i + 1 < len(lines):
                     amount_str = re.sub(r"[^\d]", "", lines[i+1])
                     amount = int(amount_str) if amount_str else 0
                 break
     
-    # 현대카드 판별
     elif "현대카드" in text:
         card = "현대카드"
-        # 금액 추출: "7,600원" 형태
         amount_match = re.search(r"([\d,]+)원", text)
         amount = int(re.sub(r"[^\d]", "", amount_match.group(1))) if amount_match else 0
         
-        # 가맹점 추출: 날짜/시간 다음 줄
         for i, line in enumerate(lines):
-            if re.match(r"\d{2}/\d{2}\s+\d{2}:\d{2}", line):  # "04/01 08:48" 형태
+            if re.match(r"\d{2}/\d{2}\s+\d{2}:\d{2}", line):
                 if i + 1 < len(lines):
                     merchant = lines[i+1]
                 break
     
     return merchant, amount, card
 
-#def normalize_merchant(name):
-#    name = name.lower()                  
-#    name = re.sub(r"[^a-z0-9가-힣]", "", name)   # 특수문자 제거
-#    return name
-
-
-#def match_merchant(normalized_name):
-    # MERCHANT_MAP의 key들이 normalized_name 안에 포함되어 있는지 확인
-#    for key in MERCHANT_MAP:
-        # 예: normalized_name이 "스타벅스강남점"이고 key가 "스타벅스"라면 매칭 성공
-#        if key in normalized_name:
-#            print(f"✅ 부분 일치 매핑 발견: {normalized_name} -> {MERCHANT_MAP[key]['name']}")
-#            return MERCHANT_MAP[key]
-#    return None
-
 def match_merchant(merchant):
-    """
-    가맹점 이름에 MERCHANT_MAP의 키워드가 포함되어 있으면 매칭
-    예: "스타벅스강남점" → "스타벅스" 매칭
-        "GS25 역삼점" → "GS25" 매칭
-    """
-    # 대소문자 구분 없이 비교하기 위해 소문자로 변환
     merchant_lower = merchant.lower()
     
-    # MERCHANT_MAP의 모든 키를 확인
     for key in MERCHANT_MAP:
         key_lower = key.lower()
-        
-        # 가맹점 이름에 키워드가 포함되어 있으면
         if key_lower in merchant_lower:
             print(f"✅ 매칭 성공: '{merchant}' → '{MERCHANT_MAP[key]['name']}' (키워드: '{key}')", flush=True)
             return MERCHANT_MAP[key]
@@ -145,10 +114,6 @@ def gpt_extract(merchant):
         print(f"GPT 오류: {e}")
         return merchant, "기타"
 
-# 🧠 카테고리 분류
-# 1. 가맹점 매핑 테이블 (상단에 추가)
-# "문자상의 이름": {"name": "노션에 표시할 이름", "category": "카테고리"}
-
 MERCHANT_MAP = {
     "LG유플러스":{"name":"통신요금","category":"구독"},
     "네이버멤버십":{"name":"네이버멤버십","category":"구독"},
@@ -168,14 +133,12 @@ MERCHANT_MAP = {
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
 }
-# 2. 카테고리 분류 함수 수정
+
 def classify_category(merchant):
-    # 매핑 테이블에 있는지 먼저 확인
     if merchant in MERCHANT_MAP:
         print(f"✅ 매핑 데이터 발견: {merchant} -> {MERCHANT_MAP[merchant]['category']}")
         return MERCHANT_MAP[merchant]["category"]
 
-    # 매핑에 없으면 기존처럼 GPT에게 물어보기
     prompt = f"""
 다음 가맹점을 소비 카테고리로 분류해.
 반드시 아래 중 하나만 출력: 식비, 카페, 교통, 쇼핑, 구독, 여가/문화, 기타
@@ -190,6 +153,7 @@ def classify_category(merchant):
         return res.choices[0].message.content.strip()
     except:
         return "기타"
+
 def clean_category(text):
     for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "여가/문화"]:
         if c in text:
@@ -223,18 +187,15 @@ def get_relation_id(db_id, name):
     return None
 
 def get_today_page():
-    # 1. 한국 시간 기준 오늘 날짜 생성 (Render 서버 시간 대응)
-    # 현재 서버가 2026년이라면 이에 맞춰 작동합니다.
     kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst) 
-    today_str = now_kst.strftime("%Y-%m-%d") # "2026-03-24" 형식
+    today_str = now_kst.strftime("%Y-%m-%d")
     
     url = f"https://api.notion.com/v1/databases/{DAILY_DB_ID}/query"
     
-    # 2. '날짜' 속성이 오늘인 데이터를 필터링
     query_data = {
         "filter": {
-            "property": "날짜",  # 사진에 있는 '날짜' 컬럼 이름
+            "property": "날짜",
             "date": {
                 "equals": today_str
             }
@@ -256,12 +217,8 @@ def get_today_page():
         return None
 
 def get_or_create_monthly_page(year: int, month: int):
-    """
-    해당 년월의 월별명세 페이지를 찾거나 새로 만듦
-    """
     title = f"{year}년 {month}월"
     
-    # 1. 이미 있는지 확인
     url = f"https://api.notion.com/v1/databases/{MONTHLY_DB_ID}/query"
     query = {
         "filter": {
@@ -291,7 +248,6 @@ def get_or_create_monthly_page(year: int, month: int):
             print(f"✅ 기존 월별명세 발견: {title}", flush=True)
             return results[0]["id"]
         
-        # 2. 없으면 새로 생성
         print(f"🆕 새 월별명세 생성: {title}", flush=True)
         create_data = {
             "parent": {"database_id": MONTHLY_DB_ID},
@@ -329,16 +285,14 @@ def add_data(body: dict):
 
     if not text:
         print("❌ text 없음", flush=True)
-        return {"status": "no_text"}
+        return PlainTextResponse("text 없음")
 
-    # 날짜 방어 강화
     if not date or date.strip() == "":
         print("⚠️ date 없음 또는 빈값 → 현재시각 사용", flush=True)
         kst = timezone(timedelta(hours=9))
         date = datetime.now(kst).isoformat()
     else:
         print(f"📅 받은 date: {date}", flush=True)
-        # yyyy-MM-dd HH:mm 형식을 ISO로 변환
         try:
             kst = timezone(timedelta(hours=9))
             dt = datetime.strptime(date, "%Y-%m-%d %H:%M")
@@ -346,20 +300,19 @@ def add_data(body: dict):
             print(f"✅ ISO 변환: {date}", flush=True)
         except Exception as e:
             print(f"❌ 날짜 변환 실패: {e}", flush=True)
-            kst = timezone(timedelta(hours=9))  # 👈 여기!
+            kst = timezone(timedelta(hours=9))
             date = datetime.now(kst).isoformat()
 
-    # 백그라운드 말고 바로 실행
     try:
         print("🚀 process_data 시작", flush=True)
         process_data(text, date)
         print("✅ 완료!", flush=True)
-        return {"status": "success"}
+        return PlainTextResponse("✅ 저장 완료!")
     except Exception as e:
         print(f"💥 에러: {e}", flush=True)
         import traceback
         traceback.print_exc()
-        return {"status": "error", "message": str(e)}
+        return PlainTextResponse(f"❌ 오류: {str(e)}")
 
 def safe_process_data(text: str, date: str):
     try:
@@ -380,7 +333,6 @@ def process_data(text: str, date: str):
         print("parse_error:", e, flush=True)
         return
 
-    # 👇 매칭 (한 번만!)
     mapping = match_merchant(merchant)
 
     if mapping:
@@ -402,12 +354,10 @@ def process_data(text: str, date: str):
     spending_id = get_relation_id(SPENDING_DB_ID, spending_type)
     today_page_id = get_today_page()
     
-    # 👇 날짜에서 년/월 추출
     dt = datetime.fromisoformat(date)
     year = dt.year
     month = dt.month
     
-    # 👇 월별명세 페이지 가져오기/생성
     monthly_page_id = get_or_create_monthly_page(year, month)
 
     data = {
@@ -420,7 +370,7 @@ def process_data(text: str, date: str):
             "지출유형": {"relation": [{"id": spending_id}] if spending_id else []},
             "날짜": {"date": {"start": date}},
             "영수증": {"relation": [{"id": today_page_id}] if today_page_id else []},
-            "월별명세": {"relation": [{"id": monthly_page_id}] if monthly_page_id else []}  # 👈 월별명세 추가!
+            "월별명세": {"relation": [{"id": monthly_page_id}] if monthly_page_id else []}
         }
     }
 
@@ -436,7 +386,6 @@ def process_data(text: str, date: str):
         print("notion_error:", e, flush=True)
 
 
-# 파일 맨 밑에 추가
 @app.get("/ping")
 async def health_check():
     return {"status": "I'm alive!"}
