@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
@@ -98,32 +99,87 @@ def match_merchant(merchant):
     return None
 
 
-def gpt_extract(merchant):
-    prompt = f"""
-다음 카드 가맹점 이름을 표준화하고 카테고리를 분류해.
+# 카테고리 목록 캐시 (Notion 카테고리 DB에서 자동 조회)
+_cached_categories = None
+FALLBACK_CATEGORIES = ["식비", "카페", "교통", "쇼핑", "구독", "여가", "통신", "기타"]
 
-출력 형식:
-이름: (대표 이름 하나, 예: GS25, 스타벅스, 쿠팡 등)
-카테고리: (식비, 카페, 교통, 쇼핑, 구독, 여가, 통신, 기타 중 하나)
 
-가맹점: {merchant}
+def get_category_names():
+    """Notion 카테고리 DB의 실제 카테고리 이름 목록을 가져온다. 실패 시 기본값."""
+    global _cached_categories
+    if _cached_categories:
+        return _cached_categories
+
+    try:
+        url = f"https://api.notion.com/v1/databases/{CATEGORY_DB_ID}/query"
+        res = requests.post(url, headers=headers)
+        names = [
+            get_title(page["properties"].get("이름"))
+            for page in res.json().get("results", [])
+        ]
+        names = [n for n in names if n]
+        if names:
+            _cached_categories = names
+            print(f"📂 카테고리 목록 로드: {names}", flush=True)
+            return names
+    except Exception as e:
+        print(f"❌ 카테고리 조회 실패(기본값 사용): {e}", flush=True)
+
+    return FALLBACK_CATEGORIES
+
+
+GPT_SYSTEM_PROMPT = """너는 한국 카드 결제 가맹점 이름을 정리하는 분류기다.
+입력으로 카드사가 보내는 가맹점 원문(지점명·법인명·약어 섞임)이 들어온다.
+
+해야 할 일:
+1) name: 사람이 알아보는 대표 상호명 하나로 정규화.
+   - 지점/번호/괄호 제거: "스타벅스강남R점" → "스타벅스", "GS25 역삼점" → "GS25"
+   - 법인명은 브랜드로 환원: "에스씨케이컴퍼니" → "스타벅스", "위대한상상" → "요기요"
+2) category: 반드시 주어진 보기 중 하나만 선택. 애매하면 가장 가까운 것, 정말 모르면 "기타".
+
+분류 기준:
+- 식비: 식당·배달·편의점 음식·베이커리
+- 카페: 커피·디저트 전문점
+- 교통: 택시·버스·지하철·주유·통행료·주차
+- 쇼핑: 마트·온라인쇼핑·의류·생활용품·화장품
+- 구독: 통신요금·멤버십·정기결제(넷플릭스 등)
+- 여가: 영화·공연·게임·여행·취미
 """
+
+
+def gpt_extract(merchant):
+    categories = get_category_names()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "대표 상호명 하나 (지점/법인명 정규화)"},
+            "category": {"type": "string", "enum": categories},
+        },
+        "required": ["name", "category"],
+        "additionalProperties": False,
+    }
+
     try:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+            temperature=0,
+            messages=[
+                {"role": "system", "content": GPT_SYSTEM_PROMPT},
+                {"role": "user", "content": f"가맹점: {merchant}\n선택 가능한 카테고리: {categories}"},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "merchant_classification",
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
         )
-        text = res.choices[0].message.content
-
-        name_match = re.search(r"이름:\s*(.*)", text)
-        cat_match = re.search(r"카테고리:\s*(.*)", text)
-
-        name = name_match.group(1).strip() if name_match else merchant
-        category = cat_match.group(1).strip() if cat_match else "기타"
-
-        return name, category
+        data = json.loads(res.choices[0].message.content)
+        return data.get("name") or merchant, data.get("category") or "기타"
     except Exception as e:
-        print(f"GPT 오류: {e}")
+        print(f"GPT 오류: {e}", flush=True)
         return merchant, "기타"
 
 
@@ -147,34 +203,6 @@ MERCHANT_MAP = {
     "에스씨케이컴퍼니": {"name": "스타벅스", "category": "카페"},
     "네이버파이낸셜": {"name": "네이버페이", "category": "기타"},
 }
-
-
-def classify_category(merchant):
-    if merchant in MERCHANT_MAP:
-        print(f"✅ 매핑 데이터 발견: {merchant} -> {MERCHANT_MAP[merchant]['category']}")
-        return MERCHANT_MAP[merchant]["category"]
-
-    prompt = f"""
-다음 가맹점을 소비 카테고리로 분류해.
-반드시 아래 중 하나만 출력: 식비, 카페, 교통, 쇼핑, 구독, 여가/문화, 기타
-
-가맹점: {merchant}
-"""
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return res.choices[0].message.content.strip()
-    except:
-        return "기타"
-
-
-def clean_category(text):
-    for c in ["식비", "카페", "교통", "쇼핑", "구독", "기타", "여가/문화"]:
-        if c in text:
-            return c
-    return "기타"
 
 
 def detect_spending_type(card):
@@ -464,7 +492,6 @@ def process_data(text: str, date: str):
         print(f"💡 [MERCHANT_MAP 추가 추천]", flush=True)
         print(f"    \"{merchant}\": {{\"name\": \"{display_name}\", \"category\": \"{category}\"}},", flush=True)
 
-    category = clean_category(category)
     amount = -abs(amount)
     spending_type = detect_spending_type(card)
 
