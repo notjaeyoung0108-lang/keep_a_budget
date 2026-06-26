@@ -327,8 +327,16 @@ def _extract_number(prop):
         return prop.get("formula", {}).get("number")
     if t == "rollup":
         r = prop.get("rollup", {})
-        if r.get("type") == "number":
+        rt = r.get("type")
+        if rt == "number":
             return r.get("number")
+        # "원본 표시" 등 array 형태 롤업: 안쪽 항목에서 숫자 추출
+        if rt == "array":
+            for item in r.get("array", []):
+                val = _extract_number(item)
+                if val is not None:
+                    return val
+            return None
     # 텍스트(rich_text) 또는 제목(title) 속성이면 문자열에서 숫자만 추출
     if t in ("rich_text", "title"):
         arr = prop.get(t, [])
@@ -350,7 +358,13 @@ def get_balance(page_id, prop_name="잔액"):
     try:
         res = requests.get(f"https://api.notion.com/v1/pages/{page_id}", headers=headers)
         props = res.json().get("properties", {})
-        return _extract_number(props.get(prop_name))
+        prop = props.get(prop_name)
+        value = _extract_number(prop)
+        if value is None:
+            # 디버그: 어떤 속성이 있는지 / 잔액 원본이 어떻게 생겼는지
+            print(f"🔍 '{prop_name}' 추출 실패. 페이지 속성들: {list(props.keys())}", flush=True)
+            print(f"🔍 '{prop_name}' 원본: {json.dumps(prop, ensure_ascii=False)}", flush=True)
+        return value
     except Exception as e:
         print(f"❌ 잔액 조회 실패: {e}", flush=True)
         return None
