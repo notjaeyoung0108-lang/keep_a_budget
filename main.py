@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
@@ -316,6 +317,19 @@ def get_or_create_monthly_page(year: int, month: int):
         return None
 
 
+def _num_from_str(s):
+    """'🍞 -68,070원' 같은 문자열에서 숫자(마이너스 포함)만 뽑아 정수로."""
+    if not s:
+        return None
+    cleaned = re.sub(r"[^\d\-]", "", s)
+    if not cleaned or cleaned == "-":
+        return None
+    try:
+        return int(cleaned)
+    except ValueError:
+        return None
+
+
 def _extract_number(prop):
     """number / formula / rollup / 텍스트 속성에서 숫자값을 꺼낸다."""
     if not prop:
@@ -324,7 +338,13 @@ def _extract_number(prop):
     if t == "number":
         return prop.get("number")
     if t == "formula":
-        return prop.get("formula", {}).get("number")
+        f = prop.get("formula", {})
+        ft = f.get("type")
+        if ft == "number":
+            return f.get("number")
+        if ft == "string":
+            return _num_from_str(f.get("string"))
+        return None
     if t == "rollup":
         r = prop.get("rollup", {})
         rt = r.get("type")
@@ -341,17 +361,11 @@ def _extract_number(prop):
     if t in ("rich_text", "title"):
         arr = prop.get(t, [])
         s = "".join(item.get("plain_text", "") for item in arr)
-        # "5,000원" 같은 형태에서 음수기호와 숫자만 남기기
-        cleaned = re.sub(r"[^\d\-]", "", s)
-        if cleaned and cleaned != "-":
-            try:
-                return int(cleaned)
-            except ValueError:
-                return None
+        return _num_from_str(s)
     return None
 
 
-def get_balance(page_id, prop_name="잔액"):
+def get_balance(page_id, prop_name="잔액", verbose=True):
     """해당 페이지에서 '잔액' 속성값을 읽어 반환. 없으면 None."""
     if not page_id:
         return None
@@ -360,7 +374,7 @@ def get_balance(page_id, prop_name="잔액"):
         props = res.json().get("properties", {})
         prop = props.get(prop_name)
         value = _extract_number(prop)
-        if value is None:
+        if value is None and verbose:
             # 디버그: 어떤 속성이 있는지 / 잔액 원본이 어떻게 생겼는지
             print(f"🔍 '{prop_name}' 추출 실패. 페이지 속성들: {list(props.keys())}", flush=True)
             print(f"🔍 '{prop_name}' 원본: {json.dumps(prop, ensure_ascii=False)}", flush=True)
@@ -404,10 +418,18 @@ def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
     except Exception:
         time_str = ""
 
-    # 잔액: 새 소비 페이지 우선, 없으면 월별명세 페이지에서 폴백
-    balance = get_balance(page_id)
-    if balance is None:
-        balance = get_balance(monthly_page_id)
+    # 잔액(롤업/수식)은 결제 직후 아직 계산 안 됐을 수 있음 → 잠깐 기다리며 재시도
+    balance = None
+    for attempt in range(5):
+        verbose = (attempt == 4)  # 마지막 시도에만 디버그 로그
+        balance = get_balance(page_id, verbose=verbose)
+        if balance is None:
+            balance = get_balance(monthly_page_id, verbose=verbose)
+        if balance is not None:
+            print(f"💰 잔액 확인(시도 {attempt + 1}회): {balance:,}원", flush=True)
+            break
+        time.sleep(1.5)
+
     balance_str = f"{balance:,.0f}원" if balance is not None else "조회불가"
 
     send_discord(display_name, time_str, amount, balance_str, balance)
