@@ -22,10 +22,8 @@ DAILY_DB_ID = os.getenv("DAILY_DB_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONTHLY_DB_ID = os.getenv("MONTHLY_DB_ID")
 
-# 📲 디스코드 웹훅 URL
-# ⚠️ 아래 URL은 채팅에 노출됐으니, 디스코드에서 웹훅을 삭제 후 새로 만들어
-#    새 URL로 교체하는 걸 권장합니다. (.env 에 DISCORD_WEBHOOK_URL 넣으면 그게 우선)
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL") or "https://discord.com/api/webhooks/1520020976509648987/Fd-bt4gtU6E-XttG1qqR2TKnWUUqt079O5FsxlaS_T6cs9YD2ivaujAq221jejnZduS6"
+# 📲 디스코드 웹훅 URL (.env 에서 읽음)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
