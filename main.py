@@ -21,8 +21,11 @@ SPENDING_DB_ID = os.getenv("SPENDING_DB_ID")
 DAILY_DB_ID = os.getenv("DAILY_DB_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONTHLY_DB_ID = os.getenv("MONTHLY_DB_ID")
-# 알림 받을 노션 사람 계정 ID (없으면 워크스페이스에서 자동 탐색)
-NOTION_USER_ID = os.getenv("NOTION_USER_ID")
+
+# 📲 디스코드 웹훅 URL
+# ⚠️ 아래 URL은 채팅에 노출됐으니, 디스코드에서 웹훅을 삭제 후 새로 만들어
+#    새 URL로 교체하는 걸 권장합니다. (.env 에 DISCORD_WEBHOOK_URL 넣으면 그게 우선)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL") or "https://discord.com/api/webhooks/1520020976509648987/Fd-bt4gtU6E-XttG1qqR2TKnWUUqt079O5FsxlaS_T6cs9YD2ivaujAq221jejnZduS6"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -315,32 +318,6 @@ def get_or_create_monthly_page(year: int, month: int):
         return None
 
 
-# 🔔 알림: 기입된 페이지에 나를 @멘션하는 댓글을 달아 노션 알림 트리거
-_cached_user_id = None
-
-
-def get_my_user_id():
-    """알림 받을 사람 계정 ID. 환경변수 우선, 없으면 워크스페이스에서 첫 person 계정 탐색."""
-    global _cached_user_id
-
-    if NOTION_USER_ID:
-        return NOTION_USER_ID
-    if _cached_user_id:
-        return _cached_user_id
-
-    try:
-        res = requests.get("https://api.notion.com/v1/users", headers=headers)
-        for user in res.json().get("results", []):
-            if user.get("type") == "person":
-                _cached_user_id = user["id"]
-                print(f"🔔 알림 대상 자동 탐색: {user.get('name')} ({_cached_user_id})", flush=True)
-                return _cached_user_id
-    except Exception as e:
-        print(f"❌ user id 조회 실패: {e}", flush=True)
-
-    return None
-
-
 def _extract_number(prop):
     """number / formula / rollup 속성에서 숫자값을 꺼낸다."""
     if not prop:
@@ -370,14 +347,37 @@ def get_balance(page_id, prop_name="잔액"):
         return None
 
 
-def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
-    """기입 완료 시 해당 페이지에 멘션 댓글을 달아 노션 알림을 발생시킨다."""
-    if not page_id:
+# 📲 디스코드 알림
+def send_discord(display_name, time_str, amount, balance_str, balance):
+    """결제 기입 완료 시 디스코드 채널로 알림 전송."""
+    if not DISCORD_WEBHOOK_URL:
+        print("⚠️ 디스코드 웹훅 URL 없음", flush=True)
         return
 
-    # 시간 (HH:MM)
+    # 잔액 음수면 빨강, 아니면 파랑 (임베드 좌측 색상 바)
+    color = 0xE74C3C if (balance is not None and balance < 0) else 0x3498DB
+
+    description = (
+        f"💸 결제내역 : {time_str} / {display_name} / {abs(amount):,}원\n"
+        f"🏦 남은금액 : {balance_str}"
+    )
+
+    payload = {"embeds": [{"description": description, "color": color}]}
+
     try:
-        time_str = datetime.fromisoformat(date).strftime("%H:%M")
+        res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        print(f"📲 디스코드 status: {res.status_code}", flush=True)
+        if res.status_code not in (200, 204):
+            print(f"📲 디스코드 응답: {res.text}", flush=True)
+    except Exception as e:
+        print(f"❌ 디스코드 전송 실패: {e}", flush=True)
+
+
+def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
+    """기입 완료 시 디스코드로 알림을 보낸다."""
+    # 시간 (HH시MM분)
+    try:
+        time_str = datetime.fromisoformat(date).strftime("%H시%M분")
     except Exception:
         time_str = ""
 
@@ -387,32 +387,7 @@ def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
         balance = get_balance(monthly_page_id)
     balance_str = f"{balance:,.0f}원" if balance is not None else "조회불가"
 
-    user_id = get_my_user_id()
-    payment_line = f" 결제내역 : {time_str} {display_name} {abs(amount):,}원\n남은금액 : "
-
-    rich_text = []
-    if user_id:
-        rich_text.append({"type": "mention", "mention": {"type": "user", "user": {"id": user_id}}})
-    rich_text.append({"type": "text", "text": {"content": payment_line}})
-    # 남은금액은 색 + 굵게 강조 (잔액 음수면 빨강, 아니면 파랑)
-    balance_color = "red" if (balance is not None and balance < 0) else "blue"
-    rich_text.append({
-        "type": "text",
-        "text": {"content": balance_str},
-        "annotations": {"bold": True, "color": balance_color},
-    })
-
-    try:
-        res = requests.post(
-            "https://api.notion.com/v1/comments",
-            headers=headers,
-            json={"parent": {"page_id": page_id}, "rich_text": rich_text},
-        )
-        print(f"🔔 알림 댓글 status: {res.status_code}", flush=True)
-        if res.status_code not in (200, 201):
-            print(f"🔔 알림 응답: {res.text}", flush=True)
-    except Exception as e:
-        print(f"❌ 알림 전송 실패: {e}", flush=True)
+    send_discord(display_name, time_str, amount, balance_str, balance)
 
 
 # 🚀 메인 API
@@ -529,7 +504,7 @@ def process_data(text: str, date: str):
         print("notion status:", res.status_code, flush=True)
         print("📊 월별명세 연결: " + (f"{year}년 {month}월" if monthly_page_id else "실패"), flush=True)
 
-        # 🔔 기입 성공 시 알림
+        # 🔔 기입 성공 시 디스코드 알림
         if res.status_code in (200, 201):
             new_page_id = res.json().get("id")
             notify_entry_done(new_page_id, display_name, amount, date, monthly_page_id)
