@@ -319,7 +319,7 @@ def get_or_create_monthly_page(year: int, month: int):
 
 
 def _extract_number(prop):
-    """number / formula / rollup 속성에서 숫자값을 꺼낸다."""
+    """number / formula / rollup / 텍스트 속성에서 숫자값을 꺼낸다."""
     if not prop:
         return None
     t = prop.get("type")
@@ -331,6 +331,17 @@ def _extract_number(prop):
         r = prop.get("rollup", {})
         if r.get("type") == "number":
             return r.get("number")
+    # 텍스트(rich_text) 또는 제목(title) 속성이면 문자열에서 숫자만 추출
+    if t in ("rich_text", "title"):
+        arr = prop.get(t, [])
+        s = "".join(item.get("plain_text", "") for item in arr)
+        # "5,000원" 같은 형태에서 음수기호와 숫자만 남기기
+        cleaned = re.sub(r"[^\d\-]", "", s)
+        if cleaned and cleaned != "-":
+            try:
+                return int(cleaned)
+            except ValueError:
+                return None
     return None
 
 
