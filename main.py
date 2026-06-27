@@ -420,7 +420,7 @@ def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
 
     # 잔액(롤업/수식)은 결제 직후 계산이 안 끝났을 수 있음
     # → 먼저 5초 기다려 노션 계산이 반영되게 한 뒤 읽고, 그래도 없으면 재시도
-    time.sleep(5)
+    time.sleep(10)
 
     balance = None
     source = None
