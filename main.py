@@ -418,15 +418,23 @@ def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
     except Exception:
         time_str = ""
 
-    # 잔액(롤업/수식)은 결제 직후 아직 계산 안 됐을 수 있음 → 잠깐 기다리며 재시도
+    # 잔액(롤업/수식)은 결제 직후 계산이 안 끝났을 수 있음
+    # → 먼저 5초 기다려 노션 계산이 반영되게 한 뒤 읽고, 그래도 없으면 재시도
+    time.sleep(5)
+
     balance = None
+    source = None
     for attempt in range(5):
         verbose = (attempt == 4)  # 마지막 시도에만 디버그 로그
         balance = get_balance(page_id, verbose=verbose)
-        if balance is None:
-            balance = get_balance(monthly_page_id, verbose=verbose)
         if balance is not None:
-            print(f"💰 잔액 확인(시도 {attempt + 1}회): {balance:,}원", flush=True)
+            source = "소비페이지"
+        else:
+            balance = get_balance(monthly_page_id, verbose=verbose)
+            if balance is not None:
+                source = "월별명세"
+        if balance is not None:
+            print(f"💰 잔액 확인(시도 {attempt + 1}회, 출처: {source}): {balance:,}원", flush=True)
             break
         time.sleep(1.5)
 
