@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import time
 import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
@@ -37,7 +36,7 @@ headers = {
 # 🔥 문자 파싱 함수
 def parse_sms(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    merchant, amount, card = "알 수 없음", 0, "기타카드"
+    merchant, amount, card, balance = "알 수 없음", 0, "기타카드", None
 
     # 케이뱅크 판별
     if "[케이뱅크]" in text:
@@ -80,7 +79,23 @@ def parse_sms(text):
                     merchant = lines[i+1]
                 break
 
-    return merchant, amount, card
+    if card == "현대카드":
+        cumulative_match = re.search(
+            r"누적(?:금액)?\s*[:：]?\s*([\d,]+)\s*원?",
+            text,
+        )
+        if cumulative_match:
+            cumulative_amount = int(cumulative_match.group(1).replace(",", ""))
+            balance = 1_000_000 - cumulative_amount
+    else:
+        balance_match = re.search(
+            r"잔액\s*[:：]?\s*([\d,]+)\s*원?",
+            text,
+        )
+        if balance_match:
+            balance = int(balance_match.group(1).replace(",", ""))
+
+    return merchant, amount, card, balance
 
 
 def match_merchant(merchant):
@@ -410,7 +425,7 @@ def send_discord(display_name, time_str, amount, balance_str, balance):
         print(f"❌ 디스코드 전송 실패: {e}", flush=True)
 
 
-def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
+def notify_entry_done(display_name, amount, date, balance):
     """기입 완료 시 디스코드로 알림을 보낸다."""
     # 시간 (HH시MM분)
     try:
@@ -418,25 +433,8 @@ def notify_entry_done(page_id, display_name, amount, date, monthly_page_id):
     except Exception:
         time_str = ""
 
-    # 잔액(롤업/수식)은 결제 직후 계산이 안 끝났을 수 있음
-    # → 먼저 5초 기다려 노션 계산이 반영되게 한 뒤 읽고, 그래도 없으면 재시도
-    time.sleep(30)
-
-    balance = None
-    source = None
-    for attempt in range(5):
-        verbose = (attempt == 4)  # 마지막 시도에만 디버그 로그
-        balance = get_balance(page_id, verbose=verbose)
-        if balance is not None:
-            source = "소비페이지"
-        else:
-            balance = get_balance(monthly_page_id, verbose=verbose)
-            if balance is not None:
-                source = "월별명세"
-        if balance is not None:
-            print(f"💰 잔액 확인(시도 {attempt + 1}회, 출처: {source}): {balance:,}원", flush=True)
-            break
-        time.sleep(1.5)
+    if balance is not None:
+        print(f"💰 문자에서 파싱한 남은금액: {balance:,.0f}원", flush=True)
 
     balance_str = f"{balance:,.0f}원" if balance is not None else "조회불가"
 
@@ -502,8 +500,9 @@ def process_data(text: str, date: str):
     print("📅 date:", date, flush=True)
 
     try:
-        merchant, amount, card = parse_sms(text)
+        merchant, amount, card, balance = parse_sms(text)
         print(f"🏪 파싱된 가맹점: '{merchant}'", flush=True)
+        print(f"💰 파싱된 잔액: {balance if balance is not None else '조회불가'}", flush=True)
     except Exception as e:
         print("parse_error:", e, flush=True)
         return
@@ -559,8 +558,7 @@ def process_data(text: str, date: str):
 
         # 🔔 기입 성공 시 디스코드 알림
         if res.status_code in (200, 201):
-            new_page_id = res.json().get("id")
-            notify_entry_done(new_page_id, display_name, amount, date, monthly_page_id)
+            notify_entry_done(display_name, amount, date, balance)
     except Exception as e:
         print("notion_error:", e, flush=True)
 
